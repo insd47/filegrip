@@ -1,0 +1,36 @@
+[package]
+name = "filegrip"
+description = "File handles over aws-sdk-s3: stat, read, write, copy, delete, list, and presign S3 objects"
+version = "0.1.0"
+edition = "2024"
+authors = ["insd47"]
+license = "MIT"
+repository = "https://github.com/insd47/filegrip"
+keywords = ["s3", "aws", "storage", "presign"]
+categories = ["filesystem", "web-programming"]
+
+[lints.clippy]
+redundant_pub_crate = "warn"
+self_named_module_files = "warn"
+
+[dependencies]
+aws-sdk-s3 = "1"
+bytes = "1"
+futures-util = "0.3"
+percent-encoding = "2"
+serde = { version = "1", optional = true }
+serde_json = { version = "1", optional = true }
+thiserror = "2"
+
+[features]
+serde = ["dep:serde", "dep:serde_json"]
+
+[dev-dependencies]
+aws-smithy-http-client = { version = "1", features = ["test-util"] }
+aws-smithy-types = "1"
+http = "1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[package.metadata.docs.rs]
+all-features = true
