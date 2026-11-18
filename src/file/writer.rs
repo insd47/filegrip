@@ -25,6 +25,7 @@ pub struct Upload {
     part_size: usize,
     concurrent: usize,
     absent: bool,
+    progress: Option<Box<dyn FnMut(u64) + Send>>,
 }
 
 impl File {
@@ -43,6 +44,7 @@ impl File {
             part_size: DEFAULT_PART_SIZE,
             concurrent: 1,
             absent: false,
+            progress: None,
         }
     }
 }
@@ -89,6 +91,16 @@ impl Upload {
         self
     }
 
+    /// Calls `progress` with the bytes in all parts S3 has accepted so far, each time a part is accepted.
+    ///
+    /// - The total grows a whole part at a time and reaches the object size before completion. A part still in flight
+    ///   counts nothing.
+    /// - It runs inside [`Writer::write`] and [`Writer::close`] while a part finishes, so it should return quickly.
+    pub fn progress(mut self, progress: impl FnMut(u64) + Send + 'static) -> Self {
+        self.progress = Some(Box::new(progress));
+        self
+    }
+
     /// Adjusts the SDK request that starts the upload, for options this builder does not wrap.
     pub fn with(
         mut self,
@@ -126,9 +138,11 @@ impl IntoFuture for Upload {
                 part_size: self.part_size,
                 concurrent: self.concurrent,
                 absent: self.absent,
+                progress: self.progress,
                 buffer: BytesMut::new(),
                 numbered: 0,
                 parts: Vec::new(),
+                uploaded: 0,
                 pending: FuturesUnordered::new(),
             })
         })
@@ -148,10 +162,13 @@ pub struct Writer {
     part_size: usize,
     concurrent: usize,
     absent: bool,
+    progress: Option<Box<dyn FnMut(u64) + Send>>,
     buffer: BytesMut,
     numbered: i32,
     parts: Vec<CompletedPart>,
-    pending: FuturesUnordered<BoxFuture<'static, Result<CompletedPart>>>,
+    uploaded: u64,
+    /// Parts in flight, each resolving to its completion and size
+    pending: FuturesUnordered<BoxFuture<'static, Result<(CompletedPart, u64)>>>,
 }
 
 impl Writer {
@@ -207,7 +224,7 @@ impl Writer {
         }
 
         while let Some(part) = self.pending.next().await {
-            self.parts.push(part?);
+            self.accept(part?);
         }
 
         self.parts.sort_by_key(|part| part.part_number);
@@ -260,6 +277,7 @@ impl Writer {
 
         self.numbered += 1;
         let number = self.numbered;
+        let size = u64::try_from(part.len()).unwrap_or(u64::MAX);
         let storage = &self.file.storage;
         let request = storage
             .client()
@@ -271,18 +289,30 @@ impl Writer {
         self.pending.push(Box::pin(async move {
             let output = request.send().await?;
 
-            Ok(CompletedPart::builder()
+            let completed = CompletedPart::builder()
                 .set_e_tag(output.e_tag)
                 .part_number(number)
-                .build())
+                .build();
+
+            Ok((completed, size))
         }));
 
         while self.pending.len() >= self.concurrent {
             let Some(done) = self.pending.next().await else { break };
-            self.parts.push(done?);
+            self.accept(done?);
         }
 
         Ok(())
+    }
+
+    /// Records a part S3 accepted and reports the new total.
+    fn accept(&mut self, (part, size): (CompletedPart, u64)) {
+        self.parts.push(part);
+        self.uploaded += size;
+
+        if let Some(progress) = &mut self.progress {
+            progress(self.uploaded);
+        }
     }
 }
 
