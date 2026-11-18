@@ -1,7 +1,7 @@
 [package]
 name = "filegrip"
 description = "File handles over aws-sdk-s3: stat, read, write, copy, delete, list, and presign S3 objects"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["insd47"]
 license = "MIT"
