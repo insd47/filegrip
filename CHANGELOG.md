@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/insd47/filegrip/compare/v0.1.1...v0.1.2) - 2026-11-18
+
+### Added
+
+- verify multipart upload parts with a checksum algorithm ([#6](https://github.com/insd47/filegrip/pull/6))
+- report multipart upload progress ([#5](https://github.com/insd47/filegrip/pull/5))
+
 ## [0.1.1](https://github.com/insd47/filegrip/compare/v0.1.0...v0.1.1) - 2026-11-18
 
 ### Added
