@@ -53,6 +53,16 @@ async fn completes_an_empty_upload_with_one_empty_part() {
 }
 
 #[tokio::test]
+async fn starts_the_upload_with_metadata() {
+    let (storage, replay) = storage(vec![status(200, CREATED), part(1), status(200, COMPLETED)]);
+
+    let writer = storage.file("a").writer().metadata("sha256", "e3b0c442").await.unwrap();
+    writer.close().await.unwrap();
+
+    assert_eq!(replay.requests()[0].header("x-amz-meta-sha256"), Some("e3b0c442"));
+}
+
+#[tokio::test]
 async fn keeps_several_parts_in_flight() {
     let responses = vec![status(200, CREATED), part(1), part(2), part(3), status(200, COMPLETED)];
     let (storage, replay) = storage(responses);

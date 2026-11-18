@@ -4,6 +4,7 @@ use aws_sdk_s3::operation::head_object::HeadObjectOutput;
 use aws_sdk_s3::operation::head_object::builders::HeadObjectFluentBuilder;
 use aws_sdk_s3::presigning::PresignedRequest;
 use futures_util::future::BoxFuture;
+use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::time::{Duration, SystemTime};
 
@@ -66,6 +67,8 @@ pub struct Stat {
     pub modified: Option<SystemTime>,
     /// Version ID in a versioned bucket
     pub version: Option<String>,
+    /// User-defined metadata, keyed without the `x-amz-meta-` prefix and in lowercase
+    pub metadata: HashMap<String, String>,
 }
 
 impl From<HeadObjectOutput> for Stat {
@@ -79,6 +82,7 @@ impl From<HeadObjectOutput> for Stat {
             etag: output.e_tag,
             modified: output.last_modified.and_then(|time| SystemTime::try_from(time).ok()),
             version: output.version_id,
+            metadata: output.metadata.unwrap_or_default(),
         }
     }
 }

@@ -20,6 +20,19 @@ async fn stat_reads_the_head_response() {
 }
 
 #[tokio::test]
+async fn stat_returns_metadata_without_the_header_prefix() {
+    let (storage, _) = storage(vec![headers(&[
+        ("content-length", "0"),
+        ("x-amz-meta-sha256", "e3b0c442"),
+    ])]);
+
+    let stat = storage.file("a").stat().await.unwrap().unwrap();
+
+    assert_eq!(stat.metadata.get("sha256").map(String::as_str), Some("e3b0c442"));
+    assert_eq!(stat.metadata.len(), 1);
+}
+
+#[tokio::test]
 async fn stat_returns_none_for_a_bodiless_404() {
     let (storage, _) = storage(vec![status(404, "")]);
 
@@ -94,6 +107,23 @@ async fn write_returns_the_etag_and_version() {
     assert_eq!(written.etag.as_deref(), Some("\"abc\""));
     assert_eq!(written.version.as_deref(), Some("v1"));
     assert_eq!(replay.requests()[0].header("content-type"), Some("text/plain"));
+}
+
+#[tokio::test]
+async fn write_sends_metadata_as_prefixed_headers() {
+    let (storage, replay) = storage(vec![headers(&[])]);
+
+    storage
+        .file("a")
+        .write()
+        .metadata("sha256", "e3b0c442")
+        .metadata("name", "a.jpg")
+        .await
+        .unwrap();
+
+    let sent = &replay.requests()[0];
+    assert_eq!(sent.header("x-amz-meta-sha256"), Some("e3b0c442"));
+    assert_eq!(sent.header("x-amz-meta-name"), Some("a.jpg"));
 }
 
 #[tokio::test]
