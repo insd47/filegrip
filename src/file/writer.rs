@@ -26,7 +26,7 @@ pub struct Upload {
     concurrent: usize,
     absent: bool,
     checksum: Option<ChecksumAlgorithm>,
-    progress: Option<Box<dyn FnMut(u64) + Send>>,
+    progress: Option<Box<dyn FnMut(u64) + Send + Sync>>,
 }
 
 impl File {
@@ -113,7 +113,7 @@ impl Upload {
     /// - The total grows a whole part at a time and reaches the object size before completion. A part still in flight
     ///   counts nothing.
     /// - It runs inside [`Writer::write`] and [`Writer::close`] while a part finishes, so it should return quickly.
-    pub fn progress(mut self, progress: impl FnMut(u64) + Send + 'static) -> Self {
+    pub fn progress(mut self, progress: impl FnMut(u64) + Send + Sync + 'static) -> Self {
         self.progress = Some(Box::new(progress));
         self
     }
@@ -181,7 +181,7 @@ pub struct Writer {
     concurrent: usize,
     absent: bool,
     checksum: Option<ChecksumAlgorithm>,
-    progress: Option<Box<dyn FnMut(u64) + Send>>,
+    progress: Option<Box<dyn FnMut(u64) + Send + Sync>>,
     buffer: BytesMut,
     numbered: i32,
     parts: Vec<CompletedPart>,
