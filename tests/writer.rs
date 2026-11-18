@@ -1,5 +1,6 @@
 mod common;
 
+use aws_sdk_s3::types::ChecksumAlgorithm;
 use common::{Sent, error, headers, status, storage};
 use filegrip::Error;
 use std::sync::{Arc, Mutex};
@@ -103,6 +104,41 @@ async fn reports_accepted_bytes_per_part_through_close() {
 
     let totals = totals.lock().unwrap();
     assert_eq!(*totals, [5 * MIB as u64, 10 * MIB as u64, 12 * MIB as u64]);
+}
+
+#[tokio::test]
+async fn carries_each_part_checksum_into_the_completion() {
+    let checksummed = headers(&[("etag", "\"part-1\""), ("x-amz-checksum-sha256", "PART==")]);
+    let (storage, replay) = storage(vec![status(200, CREATED), checksummed, status(200, COMPLETED)]);
+
+    let mut writer = storage
+        .file("a")
+        .writer()
+        .checksum(ChecksumAlgorithm::Sha256)
+        .await
+        .unwrap();
+    writer.write(b"hello".to_vec()).await.unwrap();
+    writer.close().await.unwrap();
+
+    let requests = replay.requests();
+    assert_eq!(requests[0].header("x-amz-checksum-algorithm"), Some("SHA256"));
+    assert!(requests[1].header("x-amz-checksum-sha256").is_some());
+    let complete = requests[2].text();
+    assert!(
+        complete.contains("<ChecksumSHA256>PART==</ChecksumSHA256>"),
+        "{complete}"
+    );
+}
+
+#[tokio::test]
+async fn completes_without_part_checksums_unless_asked() {
+    let checksummed = headers(&[("etag", "\"part-1\""), ("x-amz-checksum-crc32", "PART==")]);
+    let (storage, replay) = storage(vec![status(200, CREATED), checksummed, status(200, COMPLETED)]);
+
+    storage.file("a").writer().await.unwrap().close().await.unwrap();
+
+    let complete = replay.requests()[2].text();
+    assert!(!complete.contains("Checksum"), "{complete}");
 }
 
 #[tokio::test]
