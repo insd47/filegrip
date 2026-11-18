@@ -41,6 +41,15 @@ impl Write {
         self
     }
 
+    /// Adds a user-defined metadata entry, sent as `x-amz-meta-{key}`.
+    ///
+    /// - S3 stores the key in lowercase, and [`Stat::metadata`](super::Stat::metadata) returns it that way.
+    /// - When presigning, each entry becomes a signed header the uploader must send as returned.
+    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.request = self.request.metadata(key, value);
+        self
+    }
+
     /// The exact body size in bytes.
     ///
     /// - When presigning, the size becomes a signed header: the uploader must send exactly this many bytes, and the

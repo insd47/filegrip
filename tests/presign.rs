@@ -50,6 +50,29 @@ async fn signs_the_content_type_and_returns_it_as_a_header_to_send() {
 }
 
 #[tokio::test]
+async fn signs_metadata_and_returns_it_as_a_header_to_send() {
+    let (storage, _) = storage(vec![]);
+
+    let put = storage
+        .file("a")
+        .write()
+        .metadata("sha256", "e3b0c442")
+        .presign(FIVE_MINUTES)
+        .await
+        .unwrap();
+
+    assert!(
+        put.uri().contains("X-Amz-SignedHeaders=host%3Bx-amz-meta-sha256"),
+        "{}",
+        put.uri()
+    );
+    assert!(
+        put.headers()
+            .any(|(name, value)| name == "x-amz-meta-sha256" && value == "e3b0c442")
+    );
+}
+
+#[tokio::test]
 async fn presigns_head_and_delete() {
     let (storage, _) = storage(vec![]);
     let file = storage.file("a");

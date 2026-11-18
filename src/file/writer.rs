@@ -53,6 +53,14 @@ impl Upload {
         self
     }
 
+    /// Adds a user-defined metadata entry, sent as `x-amz-meta-{key}`.
+    ///
+    /// - S3 stores the key in lowercase, and [`Stat::metadata`](super::Stat::metadata) returns it that way.
+    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.request = self.request.metadata(key, value);
+        self
+    }
+
     /// Bytes per part, 8 MiB by default.
     ///
     /// - Must be between 5 MiB and 5 GiB, or awaiting fails with [`Error::Invalid`].
