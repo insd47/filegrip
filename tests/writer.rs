@@ -2,6 +2,7 @@ mod common;
 
 use common::{Sent, error, headers, status, storage};
 use filegrip::Error;
+use std::sync::{Arc, Mutex};
 
 const MIB: usize = 1024 * 1024;
 const CREATED: &str = "<InitiateMultipartUploadResult><UploadId>upload</UploadId></InitiateMultipartUploadResult>";
@@ -79,6 +80,29 @@ async fn keeps_several_parts_in_flight() {
 
     let complete = replay.requests()[4].text();
     assert_eq!(complete.matches("<PartNumber>").count(), 3, "{complete}");
+}
+
+#[tokio::test]
+async fn reports_accepted_bytes_per_part_through_close() {
+    let responses = vec![status(200, CREATED), part(1), part(2), part(3), status(200, COMPLETED)];
+    let (storage, _) = storage(responses);
+    let totals = Arc::new(Mutex::new(Vec::new()));
+    let seen = totals.clone();
+
+    let mut writer = storage
+        .file("big")
+        .writer()
+        .part_size(5 * MIB)
+        .concurrent(4)
+        .progress(move |uploaded| seen.lock().unwrap().push(uploaded))
+        .await
+        .unwrap();
+    writer.write(vec![0; 12 * MIB]).await.unwrap();
+    assert!(totals.lock().unwrap().is_empty(), "parts still in flight count nothing");
+    writer.close().await.unwrap();
+
+    let totals = totals.lock().unwrap();
+    assert_eq!(*totals, [5 * MIB as u64, 10 * MIB as u64, 12 * MIB as u64]);
 }
 
 #[tokio::test]
