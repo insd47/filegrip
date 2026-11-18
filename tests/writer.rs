@@ -22,6 +22,16 @@ fn size(sent: &Sent) -> usize {
     length.unwrap().parse().unwrap()
 }
 
+/// Callers keep the builder and the open upload in shared or spawned state, so the auto traits are API.
+#[test]
+fn upload_is_send_and_sync_and_writer_is_send() {
+    fn send_sync<T: Send + Sync>() {}
+    fn send<T: Send>() {}
+
+    send_sync::<filegrip::Upload>();
+    send::<filegrip::Writer>();
+}
+
 #[tokio::test]
 async fn cuts_uneven_writes_into_equal_parts_and_completes_in_order() {
     let responses = vec![status(200, CREATED), part(1), part(2), part(3), status(200, COMPLETED)];
