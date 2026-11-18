@@ -1,7 +1,7 @@
 use super::{File, Written};
 use crate::{Error, Result};
 use aws_sdk_s3::operation::create_multipart_upload::builders::CreateMultipartUploadFluentBuilder;
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
 use bytes::{Bytes, BytesMut};
 use futures_util::future::BoxFuture;
 use futures_util::stream::{FuturesUnordered, StreamExt};
@@ -25,6 +25,7 @@ pub struct Upload {
     part_size: usize,
     concurrent: usize,
     absent: bool,
+    checksum: Option<ChecksumAlgorithm>,
     progress: Option<Box<dyn FnMut(u64) + Send>>,
 }
 
@@ -44,6 +45,7 @@ impl File {
             part_size: DEFAULT_PART_SIZE,
             concurrent: 1,
             absent: false,
+            checksum: None,
             progress: None,
         }
     }
@@ -88,6 +90,21 @@ impl Upload {
     /// otherwise.
     pub fn if_absent(mut self) -> Self {
         self.absent = true;
+        self
+    }
+
+    /// Has S3 verify every part with `algorithm` and store a checksum of the object.
+    ///
+    /// - The SDK computes each part's checksum, S3 rejects a part that does not match, and completion lists the part
+    ///   checksums so S3 can combine them.
+    /// - CRC64NVME combines into a checksum of the whole object. SHA-1 and SHA-256 combine only as a composite, a
+    ///   checksum of the part checksums suffixed `-N`, which never equals a hash of the whole body. CRC32 and CRC32C
+    ///   allow either; choose with `with(|create| create.checksum_type(..))`.
+    /// - R2 supports CRC64NVME only whole-object and the other algorithms only composite.
+    /// - Without it, the SDK still checks each part in transit with CRC32.
+    pub fn checksum(mut self, algorithm: ChecksumAlgorithm) -> Self {
+        self.request = self.request.checksum_algorithm(algorithm.clone());
+        self.checksum = Some(algorithm);
         self
     }
 
@@ -138,6 +155,7 @@ impl IntoFuture for Upload {
                 part_size: self.part_size,
                 concurrent: self.concurrent,
                 absent: self.absent,
+                checksum: self.checksum,
                 progress: self.progress,
                 buffer: BytesMut::new(),
                 numbered: 0,
@@ -162,6 +180,7 @@ pub struct Writer {
     part_size: usize,
     concurrent: usize,
     absent: bool,
+    checksum: Option<ChecksumAlgorithm>,
     progress: Option<Box<dyn FnMut(u64) + Send>>,
     buffer: BytesMut,
     numbered: i32,
@@ -284,17 +303,36 @@ impl Writer {
             .upload_part()
             .bucket(storage.bucket())
             .key(&self.file.key);
-        let request = request.upload_id(&self.upload_id).part_number(number).body(part.into());
+        let request = request
+            .upload_id(&self.upload_id)
+            .part_number(number)
+            .set_checksum_algorithm(self.checksum.clone())
+            .body(part.into());
+        let checksummed = self.checksum.is_some();
 
         self.pending.push(Box::pin(async move {
             let output = request.send().await?;
+            let completed = CompletedPart::builder().set_e_tag(output.e_tag).part_number(number);
 
-            let completed = CompletedPart::builder()
-                .set_e_tag(output.e_tag)
-                .part_number(number)
-                .build();
+            // Part checksums go on the completion only when the upload named an algorithm. Otherwise the SDK's
+            // default CRC32 is a transit check, and the completion stays as it was.
+            let completed = if checksummed {
+                completed
+                    .set_checksum_crc32(output.checksum_crc32)
+                    .set_checksum_crc32_c(output.checksum_crc32_c)
+                    .set_checksum_crc64_nvme(output.checksum_crc64_nvme)
+                    .set_checksum_sha1(output.checksum_sha1)
+                    .set_checksum_sha256(output.checksum_sha256)
+                    .set_checksum_sha512(output.checksum_sha512)
+                    .set_checksum_md5(output.checksum_md5)
+                    .set_checksum_xxhash64(output.checksum_xxhash64)
+                    .set_checksum_xxhash3(output.checksum_xxhash3)
+                    .set_checksum_xxhash128(output.checksum_xxhash128)
+            } else {
+                completed
+            };
 
-            Ok((completed, size))
+            Ok((completed.build(), size))
         }));
 
         while self.pending.len() >= self.concurrent {
